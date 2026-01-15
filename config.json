@@ -5,9 +5,9 @@
   },
   "chunk_generation": {
     "enabled": true,
-    "chunks": 100,
+    "chunks": 1000,
     "shape": "square",
     "center_on_spawn": true,
-    "timeout_seconds": 600
+    "timeout_seconds": 6000
   }
 }
