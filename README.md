@@ -12,9 +12,9 @@ A reproducible Minecraft Paper server with the Manhunt+ plugin for playing Dream
 
 | File | Description |
 |------|-------------|
-| `paper-1.21.11-92.jar` | Paper server (Minecraft 1.21.11) |
-| `ManhuntPlus-1.3.jar` | Manhunt+ plugin |
-| `Chunky-Bukkit-1.4.40.jar` | Chunk pre-generator |
+| `minecraft/paper-1.21.11-92.jar` | Paper server (Minecraft 1.21.11) |
+| `minecraft/plugins/ManhuntPlus-1.3.jar` | Manhunt+ plugin |
+| `minecraft/plugins/Chunky-Bukkit-1.4.40.jar` | Chunk pre-generator |
 
 ## Helper Scripts
 
@@ -24,6 +24,7 @@ A reproducible Minecraft Paper server with the Manhunt+ plugin for playing Dream
 | `install_requirements.bash` | Install Java 21 on Debian 13 |
 | `worlds.bash` | Advanced world manager with Chunky pre-generation |
 | `compile_pdf.bash` | Compile README.md to PDF |
+| `clean.bash` | Clean git-ignored files (reset to fresh state) |
 
 ## Quick Start
 
@@ -37,15 +38,10 @@ This installs OpenJDK 21.
 
 ### 1. First-time Setup
 
+The server and plugins are already in place. Just accept the EULA:
+
 ```bash
-# Create plugins directory
-mkdir -p plugins
-
-# Move the plugins to plugins folder
-mv ManhuntPlus-1.3.jar Chunky-Bukkit-1.4.40.jar plugins/
-
-# Accept the EULA
-echo "eula=true" > eula.txt
+echo "eula=true" > minecraft/eula.txt
 ```
 
 ### 2. Start the Server
@@ -166,7 +162,7 @@ When you run `bash worlds.bash gen 10`:
    - Saves with `save-all` and gracefully stops the server
    - Moves all world folders (`world`, `world_nether`, `world_the_end`) to `worlds/numX_YYYYMMDD_HHMMSS/`
 
-2. **Worlds are stored in:** `worlds/` folder with naming like `num1_20250114_153022`
+2. **Worlds are stored in:** `worlds/` folder with naming like `num1_20260114_153022`
 
 ### Configuration (config.json)
 
@@ -219,8 +215,8 @@ bash worlds.bash gen 10
 bash worlds.bash list
 # Output:
 #   NUM    FOLDER NAME              GENERATED
-#   1      num1_20250114_153022     2025-01-14 15:30:22
-#   2      num2_20250114_153512     2025-01-14 15:35:12
+#   1      num1_20260114_153022     2026-01-14 15:30:22
+#   2      num2_20260114_153512     2026-01-14 15:35:12
 #   ...
 
 # Switch to world 3 (deletes current world permanently!)
@@ -317,23 +313,30 @@ MINECRAFTSERVER/
 ├── config.json              # Server and generation settings
 ├── install_requirements.bash
 ├── compile_pdf.bash
+├── clean.bash               # Clean git-ignored files
 ├── README.md
+├── .gitignore
 ├── minecraft/               # Server directory
 │   ├── paper-1.21.11-92.jar
 │   ├── eula.txt
 │   ├── server.properties
+│   ├── bukkit.yml
+│   ├── spigot.yml
+│   ├── commands.yml
 │   ├── plugins/
 │   │   ├── ManhuntPlus-1.3.jar
-│   │   └── Chunky-Bukkit-1.4.40.jar
+│   │   ├── Chunky-Bukkit-1.4.40.jar
+│   │   ├── ManhuntPlus/     # Plugin config (generated)
+│   │   └── Chunky/          # Plugin config (generated)
 │   ├── world/               # Current active world
 │   ├── world_nether/
 │   └── world_the_end/
 └── worlds/                  # Saved worlds from worlds.bash
-    ├── num1_20250114_153022/
+    ├── num1_20260114_153022/
     │   ├── world/
     │   ├── world_nether/
     │   └── world_the_end/
-    ├── num2_20250114_153512/
+    ├── num2_20260114_153512/
     └── ...
 ```
 
