@@ -5,7 +5,7 @@
   },
   "chunk_generation": {
     "enabled": true,
-    "chunks": 1000,
+    "radius": 500,
     "shape": "square",
     "center_on_spawn": true,
     "timeout_seconds": 6000

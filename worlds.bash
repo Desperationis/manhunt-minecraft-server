@@ -47,8 +47,8 @@ get_config() {
         "chunk_generation.enabled")
             value=$(grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//' | tr -d ' ')
             ;;
-        "chunk_generation.chunks")
-            value=$(grep -o '"chunks"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
+        "chunk_generation.radius")
+            value=$(grep -o '"radius"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
             ;;
         "chunk_generation.shape")
             value=$(grep -o '"shape"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*"//' | tr -d '"')
@@ -75,16 +75,6 @@ get_config() {
     else
         echo "$value"
     fi
-}
-
-# Calculate chunk radius from total chunks (for square shape)
-# For a square with N chunks, side = sqrt(N), radius = side/2
-calculate_chunk_radius() {
-    local chunks=$1
-    local side
-    side=$(echo "sqrt($chunks)" | bc)
-    local radius=$(( (side + 1) / 2 ))
-    echo "$radius"
 }
 
 # Ensure worlds directory exists
@@ -252,12 +242,11 @@ run_server_for_world_gen() {
     if [ "$chunky_enabled" = "true" ]; then
         print_chunky "Starting chunk pre-generation..."
 
-        local chunks shape chunk_radius
-        chunks=$(get_config "chunk_generation.chunks" "100")
+        local radius shape
+        radius=$(get_config "chunk_generation.radius" "500")
         shape=$(get_config "chunk_generation.shape" "square")
-        chunk_radius=$(calculate_chunk_radius "$chunks")
 
-        print_chunky "Configuration: $chunks chunks, ${shape} shape, radius ${chunk_radius}c"
+        print_chunky "Configuration: ${radius} block radius, ${shape} shape"
 
         # Configure Chunky
         send_command "chunky world world"
@@ -266,7 +255,7 @@ run_server_for_world_gen() {
         sleep 1
         send_command "chunky spawn"
         sleep 1
-        send_command "chunky radius ${chunk_radius}c"
+        send_command "chunky radius $radius"
         sleep 1
 
         # Start generation
@@ -288,8 +277,9 @@ run_server_for_world_gen() {
                 return 1
             fi
 
-            # Check for Chunky completion (looks for "Task finished" or 100%)
-            if grep -E "(Task finished|100\.0%.*complete)" "$log_file" 2>/dev/null | tail -1 | grep -qE "(Task finished|100\.0%)"; then
+            # Check for Chunky completion - only "Task finished" is definitive
+            # (100% progress can appear before finalization is complete)
+            if grep -q "Task finished for" "$log_file" 2>/dev/null; then
                 chunky_done=true
                 print_success "Chunk pre-generation complete!"
                 break
@@ -409,14 +399,14 @@ cmd_gen() {
     # Show config
     echo ""
     print_info "Configuration (from config.json):"
-    local chunky_enabled chunks shape max_mem_gb
+    local chunky_enabled radius shape max_mem_gb
     chunky_enabled=$(get_config "chunk_generation.enabled" "true")
-    chunks=$(get_config "chunk_generation.chunks" "100")
+    radius=$(get_config "chunk_generation.radius" "500")
     shape=$(get_config "chunk_generation.shape" "square")
     max_mem_gb=$(get_config "server.max_memory_gb" "0")
     print_info "  Max memory: ${max_mem_gb}GB"
     print_info "  Chunky enabled: $chunky_enabled"
-    print_info "  Chunks to generate: $chunks"
+    print_info "  Radius: ${radius} blocks"
     print_info "  Shape: $shape"
     echo ""
 
