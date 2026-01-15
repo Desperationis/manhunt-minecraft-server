@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Advanced Minecraft World Manager
+# Advanced Minecraft World Manager with Chunky Pre-generation
 # Usage:
-#   bash worlds.bash gen N    - Generate N new worlds
+#   bash worlds.bash gen N    - Generate N new worlds with chunk pre-generation
 #   bash worlds.bash use N    - Switch to world N (deletes current world)
 #   bash worlds.bash list     - List all available worlds
 
@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$SCRIPT_DIR/minecraft"
 WORLDS_DIR="$SCRIPT_DIR/worlds"
+CONFIG_FILE="$SCRIPT_DIR/worlds_config.json"
 JAR="paper-1.21.11-92.jar"
 WORLD_FOLDERS=("world" "world_nether" "world_the_end")
 
@@ -20,6 +21,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # Print functions
@@ -28,6 +30,59 @@ print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 print_step() { echo -e "${CYAN}[STEP]${NC} $1"; }
+print_chunky() { echo -e "${MAGENTA}[CHUNKY]${NC} $1"; }
+
+# Read config values (with defaults)
+get_config() {
+    local key=$1
+    local default=$2
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "$default"
+        return
+    fi
+
+    local value
+    case "$key" in
+        "chunk_generation.enabled")
+            value=$(grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//' | tr -d ' ')
+            ;;
+        "chunk_generation.chunks")
+            value=$(grep -o '"chunks"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
+            ;;
+        "chunk_generation.shape")
+            value=$(grep -o '"shape"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*"//' | tr -d '"')
+            ;;
+        "chunk_generation.center_on_spawn")
+            value=$(grep -o '"center_on_spawn"[[:space:]]*:[[:space:]]*[^,}]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//' | tr -d ' ')
+            ;;
+        "server.startup_timeout_seconds")
+            value=$(grep -o '"startup_timeout_seconds"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
+            ;;
+        "server.chunky_timeout_seconds")
+            value=$(grep -o '"chunky_timeout_seconds"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
+            ;;
+        *)
+            value=""
+            ;;
+    esac
+
+    if [ -z "$value" ]; then
+        echo "$default"
+    else
+        echo "$value"
+    fi
+}
+
+# Calculate chunk radius from total chunks (for square shape)
+# For a square with N chunks, side = sqrt(N), radius = side/2
+calculate_chunk_radius() {
+    local chunks=$1
+    local side
+    side=$(echo "sqrt($chunks)" | bc)
+    local radius=$(( (side + 1) / 2 ))
+    echo "$radius"
+}
 
 # Ensure worlds directory exists
 ensure_worlds_dir() {
@@ -81,9 +136,8 @@ get_memory_settings() {
     echo "$server_mem_mb"
 }
 
-# Run server and wait for world generation
+# Run server with command input capability
 run_server_for_world_gen() {
-    local server_pid
     local mem_mb
     mem_mb=$(get_memory_settings)
 
@@ -91,10 +145,16 @@ run_server_for_world_gen() {
 
     cd "$SERVER_DIR"
 
-    # Start server in background, redirect output to a temp file for monitoring
+    # Create a named pipe for sending commands
+    local fifo_in="/tmp/mc_server_in_$$"
     local log_file="/tmp/mc_world_gen_$$.log"
 
-    java \
+    rm -f "$fifo_in"
+    mkfifo "$fifo_in"
+
+    # Start server with FIFO as stdin
+    # Use tail -f to keep the FIFO open
+    tail -f "$fifo_in" | java \
         -Xms${mem_mb}M \
         -Xmx${mem_mb}M \
         -XX:+UseG1GC \
@@ -119,56 +179,140 @@ run_server_for_world_gen() {
         -Daikars.new.flags=true \
         -jar "$JAR" --nogui > "$log_file" 2>&1 &
 
-    server_pid=$!
+    local server_pid=$!
+    local tail_pid=$(pgrep -P $$ -f "tail -f $fifo_in" | head -1)
+
     print_info "Server started with PID: $server_pid"
 
-    # Wait for server to be ready (look for "Done" message)
-    print_info "Waiting for world generation..."
-    local timeout=300  # 5 minute timeout
+    # Function to send command to server
+    send_command() {
+        echo "$1" > "$fifo_in"
+        sleep 0.5
+    }
+
+    # Wait for server to be ready
+    print_info "Waiting for server startup..."
+    local startup_timeout
+    startup_timeout=$(get_config "server.startup_timeout_seconds" "300")
     local elapsed=0
     local done_found=false
 
-    while [ $elapsed -lt $timeout ]; do
+    while [ $elapsed -lt "$startup_timeout" ]; do
         if ! kill -0 "$server_pid" 2>/dev/null; then
             print_error "Server crashed unexpectedly!"
-            cat "$log_file"
-            rm -f "$log_file"
+            tail -50 "$log_file"
+            rm -f "$fifo_in" "$log_file"
             return 1
         fi
 
         if grep -q "Done" "$log_file" 2>/dev/null; then
             done_found=true
-            print_success "World generation complete!"
+            print_success "Server started successfully!"
             break
         fi
 
         sleep 2
         elapsed=$((elapsed + 2))
 
-        # Show progress every 10 seconds
         if [ $((elapsed % 10)) -eq 0 ]; then
-            print_info "  Still generating... (${elapsed}s elapsed)"
+            print_info "  Still starting... (${elapsed}s elapsed)"
         fi
     done
 
     if [ "$done_found" = false ]; then
-        print_error "Timeout waiting for world generation!"
+        print_error "Timeout waiting for server startup!"
         kill "$server_pid" 2>/dev/null || true
-        rm -f "$log_file"
+        kill "$tail_pid" 2>/dev/null || true
+        rm -f "$fifo_in" "$log_file"
         return 1
     fi
 
-    # Give the server a moment to finish any pending saves
+    # Give server a moment to settle
     sleep 3
 
-    # Send stop command to the server via RCON or just kill it gracefully
+    # Check if Chunky pre-generation is enabled
+    local chunky_enabled
+    chunky_enabled=$(get_config "chunk_generation.enabled" "true")
+
+    if [ "$chunky_enabled" = "true" ]; then
+        print_chunky "Starting chunk pre-generation..."
+
+        local chunks shape chunk_radius
+        chunks=$(get_config "chunk_generation.chunks" "100")
+        shape=$(get_config "chunk_generation.shape" "square")
+        chunk_radius=$(calculate_chunk_radius "$chunks")
+
+        print_chunky "Configuration: $chunks chunks, ${shape} shape, radius ${chunk_radius}c"
+
+        # Configure Chunky
+        send_command "chunky world world"
+        sleep 1
+        send_command "chunky shape $shape"
+        sleep 1
+        send_command "chunky spawn"
+        sleep 1
+        send_command "chunky radius ${chunk_radius}c"
+        sleep 1
+
+        # Start generation
+        send_command "chunky start"
+        sleep 2
+
+        # Wait for Chunky to complete
+        local chunky_timeout
+        chunky_timeout=$(get_config "server.chunky_timeout_seconds" "600")
+        local chunky_elapsed=0
+        local chunky_done=false
+
+        print_chunky "Generating chunks (timeout: ${chunky_timeout}s)..."
+
+        while [ $chunky_elapsed -lt "$chunky_timeout" ]; do
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+                print_error "Server crashed during chunk generation!"
+                rm -f "$fifo_in" "$log_file"
+                return 1
+            fi
+
+            # Check for Chunky completion (looks for "Task finished" or 100%)
+            if grep -E "(Task finished|100\.0%.*complete)" "$log_file" 2>/dev/null | tail -1 | grep -qE "(Task finished|100\.0%)"; then
+                chunky_done=true
+                print_success "Chunk pre-generation complete!"
+                break
+            fi
+
+            # Show progress from Chunky
+            local progress
+            progress=$(grep -oE "[0-9]+\.[0-9]+%.*chunks" "$log_file" 2>/dev/null | tail -1 || echo "")
+            if [ -n "$progress" ]; then
+                print_chunky "  Progress: $progress"
+            fi
+
+            sleep 5
+            chunky_elapsed=$((chunky_elapsed + 5))
+
+            if [ $((chunky_elapsed % 30)) -eq 0 ] && [ -z "$progress" ]; then
+                print_info "  Still generating... (${chunky_elapsed}s elapsed)"
+            fi
+        done
+
+        if [ "$chunky_done" = false ]; then
+            print_warning "Chunky timeout reached, stopping generation..."
+            send_command "chunky cancel"
+            sleep 2
+        fi
+
+        # Save the world
+        print_info "Saving world..."
+        send_command "save-all"
+        sleep 5
+    fi
+
+    # Stop server gracefully
     print_info "Stopping server gracefully..."
+    send_command "stop"
 
-    # Try to stop gracefully by sending SIGTERM
-    kill "$server_pid" 2>/dev/null || true
-
-    # Wait for server to stop (max 30 seconds)
-    local stop_timeout=30
+    # Wait for server to stop
+    local stop_timeout=60
     local stop_elapsed=0
     while kill -0 "$server_pid" 2>/dev/null && [ $stop_elapsed -lt $stop_timeout ]; do
         sleep 1
@@ -182,8 +326,14 @@ run_server_for_world_gen() {
         sleep 2
     fi
 
+    # Clean up tail process
+    kill "$tail_pid" 2>/dev/null || true
+    pkill -f "tail -f $fifo_in" 2>/dev/null || true
+
     print_success "Server stopped."
-    rm -f "$log_file"
+
+    # Cleanup
+    rm -f "$fifo_in" "$log_file"
 
     cd "$SCRIPT_DIR"
     return 0
@@ -240,6 +390,18 @@ cmd_gen() {
     fi
 
     ensure_worlds_dir
+
+    # Show config
+    echo ""
+    print_info "Configuration (from worlds_config.json):"
+    local chunky_enabled chunks shape
+    chunky_enabled=$(get_config "chunk_generation.enabled" "true")
+    chunks=$(get_config "chunk_generation.chunks" "100")
+    shape=$(get_config "chunk_generation.shape" "square")
+    print_info "  Chunky enabled: $chunky_enabled"
+    print_info "  Chunks to generate: $chunks"
+    print_info "  Shape: $shape"
+    echo ""
 
     print_info "Generating $count world(s)..."
     echo ""
@@ -391,7 +553,7 @@ cmd_list() {
 # Show usage
 usage() {
     echo ""
-    echo "Minecraft World Manager"
+    echo "Minecraft World Manager with Chunky Pre-generation"
     echo ""
     echo "Usage:"
     echo "  bash worlds.bash gen <count>   Generate <count> new worlds"
@@ -402,6 +564,8 @@ usage() {
     echo "  bash worlds.bash gen 10        Generate 10 new worlds"
     echo "  bash worlds.bash use 1         Switch to world num1"
     echo "  bash worlds.bash list          Show all saved worlds"
+    echo ""
+    echo "Configuration: Edit worlds_config.json to change settings"
     echo ""
 }
 

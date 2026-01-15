@@ -1,0 +1,12 @@
+{
+  "chunk_generation": {
+    "enabled": true,
+    "chunks": 100,
+    "shape": "square",
+    "center_on_spawn": true
+  },
+  "server": {
+    "startup_timeout_seconds": 300,
+    "chunky_timeout_seconds": 600
+  }
+}
