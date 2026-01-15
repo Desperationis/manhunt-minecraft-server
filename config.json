@@ -1,0 +1,13 @@
+{
+  "server": {
+    "max_memory_gb": 8,
+    "startup_timeout_seconds": 300
+  },
+  "chunk_generation": {
+    "enabled": true,
+    "chunks": 100,
+    "shape": "square",
+    "center_on_spawn": true,
+    "timeout_seconds": 600
+  }
+}

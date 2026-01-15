@@ -22,7 +22,7 @@ A reproducible Minecraft Paper server with the Manhunt+ plugin for playing Dream
 |--------|-------------|
 | `run_world.bash` | Run the server with optimal settings |
 | `install_requirements.bash` | Install Java 21 on Debian 13 |
-| `generate_worlds.bash <n>` | Generate n world folders for quick resets |
+| `worlds.bash` | Advanced world manager with Chunky pre-generation |
 | `compile_pdf.bash` | Compile README.md to PDF |
 
 ## Quick Start
@@ -136,27 +136,106 @@ Before playing manhunt, pre-generate all three dimensions:
 /chunky start
 ```
 
-## Batch World Generation
+## World Manager (worlds.bash)
 
-Generate multiple pre-made worlds for quick game resets:
+The `worlds.bash` script provides automated world generation with Chunky pre-generation, making it easy to generate and manage multiple worlds for quick game resets.
 
-```bash
-# Generate 10 worlds (manhunt_01 through manhunt_10)
-./generate_worlds.bash 10
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `bash worlds.bash gen <n>` | Generate n new worlds with chunk pre-generation |
+| `bash worlds.bash use <n>` | Load world n (permanently deletes current world) |
+| `bash worlds.bash list` | List all saved worlds with generation dates |
+
+### How It Works
+
+When you run `bash worlds.bash gen 10`:
+
+1. **For each world (1-10):**
+   - Deletes any existing world in `minecraft/`
+   - Starts the Minecraft server
+   - Waits for the world to generate (detects "Done" message)
+   - Sends Chunky commands to pre-generate chunks around spawn:
+     - `chunky world world` - Select overworld
+     - `chunky shape square` - Use square shape
+     - `chunky spawn` - Center on spawn point
+     - `chunky radius Nc` - Set radius in chunks
+     - `chunky start` - Begin generation
+   - Monitors Chunky progress until completion
+   - Saves with `save-all` and gracefully stops the server
+   - Moves all world folders (`world`, `world_nether`, `world_the_end`) to `worlds/numX_YYYYMMDD_HHMMSS/`
+
+2. **Worlds are stored in:** `worlds/` folder with naming like `num1_20250114_153022`
+
+### Configuration (config.json)
+
+Edit `config.json` in the root directory to customize server and generation settings:
+
+```json
+{
+  "server": {
+    "max_memory_gb": 8,
+    "startup_timeout_seconds": 300
+  },
+  "chunk_generation": {
+    "enabled": true,
+    "chunks": 100,
+    "shape": "square",
+    "center_on_spawn": true,
+    "timeout_seconds": 600
+  }
+}
 ```
 
-This creates separate world folders you can swap in:
+| Setting | Description |
+|---------|-------------|
+| `max_memory_gb` | Maximum RAM for the server (used by both `run_world.bash` and `worlds.bash`) |
+| `startup_timeout_seconds` | Max seconds to wait for server startup |
+| `enabled` | Set to `false` to skip Chunky pre-generation |
+| `chunks` | Total chunks to pre-generate (100 = 10x10 square) |
+| `shape` | Chunky shape: `square`, `circle`, `diamond`, etc. |
+| `center_on_spawn` | Always centers on world spawn point |
+| `timeout_seconds` | Max seconds to wait for chunk generation |
+
+### Chunk Count Examples
+
+The script calculates radius as `sqrt(chunks) / 2`:
+
+| Chunks | Grid Size | Radius | Approximate Area |
+|--------|-----------|--------|------------------|
+| 100 | 10x10 | 5c (80 blocks) | 160x160 blocks |
+| 400 | 20x20 | 10c (160 blocks) | 320x320 blocks |
+| 900 | 30x30 | 15c (240 blocks) | 480x480 blocks |
+| 2500 | 50x50 | 25c (400 blocks) | 800x800 blocks |
+
+### Usage Examples
 
 ```bash
-# To use a specific world, stop the server then:
-rm -rf world world_nether world_the_end
-cp -r manhunt_05 world
-cp -r manhunt_05_nether world_nether
-cp -r manhunt_05_the_end world_the_end
+# Generate 10 pre-generated worlds
+bash worlds.bash gen 10
 
-# Start the server with the new world
+# List available worlds
+bash worlds.bash list
+# Output:
+#   NUM    FOLDER NAME              GENERATED
+#   1      num1_20250114_153022     2025-01-14 15:30:22
+#   2      num2_20250114_153512     2025-01-14 15:35:12
+#   ...
+
+# Switch to world 3 (deletes current world permanently!)
+bash worlds.bash use 3
+
+# Start playing on the loaded world
 ./run_world.bash
 ```
+
+### Notes
+
+- The `use` command **permanently deletes** the current world before loading
+- A confirmation prompt prevents accidental deletion
+- Loaded worlds are removed from the `worlds/` folder (one-time use)
+- Generate more worlds anytime with `gen` - numbering continues automatically
 
 ## How to Play
 
@@ -233,24 +312,29 @@ Download from: https://modrinth.com/plugin/chunky
 
 ```
 MINECRAFTSERVER/
-├── paper-1.21.11-92.jar
-├── eula.txt
-├── server.properties
-├── run_world.bash
+├── run_world.bash           # Start the server
+├── worlds.bash              # World manager script
+├── config.json              # Server and generation settings
 ├── install_requirements.bash
-├── generate_worlds.bash
 ├── compile_pdf.bash
 ├── README.md
-├── plugins/
-│   ├── ManhuntPlus-1.3.jar
-│   └── Chunky-Bukkit-1.4.40.jar
-├── world/
-├── world_nether/
-├── world_the_end/
-├── manhunt_01/          # Generated worlds
-├── manhunt_01_nether/
-├── manhunt_01_the_end/
-└── ...
+├── minecraft/               # Server directory
+│   ├── paper-1.21.11-92.jar
+│   ├── eula.txt
+│   ├── server.properties
+│   ├── plugins/
+│   │   ├── ManhuntPlus-1.3.jar
+│   │   └── Chunky-Bukkit-1.4.40.jar
+│   ├── world/               # Current active world
+│   ├── world_nether/
+│   └── world_the_end/
+└── worlds/                  # Saved worlds from worlds.bash
+    ├── num1_20250114_153022/
+    │   ├── world/
+    │   ├── world_nether/
+    │   └── world_the_end/
+    ├── num2_20250114_153512/
+    └── ...
 ```
 
 ## Sources

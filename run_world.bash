@@ -5,7 +5,32 @@ set -euo pipefail
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$SCRIPT_DIR/minecraft"
+CONFIG_FILE="$SCRIPT_DIR/config.json"
 JAR="paper-1.21.11-92.jar"
+
+# Read config value with default fallback
+get_config() {
+    local key=$1
+    local default=$2
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "$default"
+        return
+    fi
+
+    local value=""
+    case "$key" in
+        "server.max_memory_gb")
+            value=$(grep -o '"max_memory_gb"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//')
+            ;;
+    esac
+
+    if [ -z "$value" ]; then
+        echo "$default"
+    else
+        echo "$value"
+    fi
+}
 
 # Change to the server directory
 cd "$SERVER_DIR"
@@ -26,7 +51,7 @@ fi
 TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 TOTAL_MEM_MB=$((TOTAL_MEM_KB / 1024))
 
-# Use 80% of total RAM for the server, leave some for OS
+# Calculate 80% of total RAM
 SERVER_MEM_MB=$((TOTAL_MEM_MB * 80 / 100))
 
 # Cap minimum at 2GB if available
@@ -34,8 +59,17 @@ if [ "$SERVER_MEM_MB" -lt 2048 ] && [ "$TOTAL_MEM_MB" -ge 2048 ]; then
     SERVER_MEM_MB=2048
 fi
 
+# Apply max memory limit from config
+MAX_MEM_GB=$(get_config "server.max_memory_gb" "0")
+if [ "$MAX_MEM_GB" -gt 0 ]; then
+    MAX_MEM_MB=$((MAX_MEM_GB * 1024))
+    if [ "$SERVER_MEM_MB" -gt "$MAX_MEM_MB" ]; then
+        SERVER_MEM_MB=$MAX_MEM_MB
+    fi
+fi
+
 echo "System RAM: ${TOTAL_MEM_MB}MB"
-echo "Server RAM: ${SERVER_MEM_MB}MB"
+echo "Server RAM: ${SERVER_MEM_MB}MB (max: ${MAX_MEM_GB}GB)"
 echo ""
 
 # Aikar's optimized JVM flags for Minecraft servers

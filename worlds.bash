@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$SCRIPT_DIR/minecraft"
 WORLDS_DIR="$SCRIPT_DIR/worlds"
-CONFIG_FILE="$SCRIPT_DIR/worlds_config.json"
+CONFIG_FILE="$SCRIPT_DIR/config.json"
 JAR="paper-1.21.11-92.jar"
 WORLD_FOLDERS=("world" "world_nether" "world_the_end")
 
@@ -56,11 +56,14 @@ get_config() {
         "chunk_generation.center_on_spawn")
             value=$(grep -o '"center_on_spawn"[[:space:]]*:[[:space:]]*[^,}]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//' | tr -d ' ')
             ;;
+        "chunk_generation.timeout_seconds")
+            value=$(grep -o '"timeout_seconds"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
+            ;;
         "server.startup_timeout_seconds")
             value=$(grep -o '"startup_timeout_seconds"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
             ;;
-        "server.chunky_timeout_seconds")
-            value=$(grep -o '"chunky_timeout_seconds"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
+        "server.max_memory_gb")
+            value=$(grep -o '"max_memory_gb"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | sed 's/.*:[[:space:]]*//')
             ;;
         *)
             value=""
@@ -124,15 +127,27 @@ world_exists() {
     [ "$(ls -A "$SERVER_DIR/world/region" 2>/dev/null)" ]
 }
 
-# Get JVM memory settings (from run_world.bash)
+# Get JVM memory settings (matches run_world.bash logic)
 get_memory_settings() {
-    local total_mem_kb total_mem_mb server_mem_mb
+    local total_mem_kb total_mem_mb server_mem_mb max_mem_gb max_mem_mb
     total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     total_mem_mb=$((total_mem_kb / 1024))
     server_mem_mb=$((total_mem_mb * 80 / 100))
+
+    # Cap minimum at 2GB if available
     if [ "$server_mem_mb" -lt 2048 ] && [ "$total_mem_mb" -ge 2048 ]; then
         server_mem_mb=2048
     fi
+
+    # Apply max memory limit from config
+    max_mem_gb=$(get_config "server.max_memory_gb" "0")
+    if [ "$max_mem_gb" -gt 0 ]; then
+        max_mem_mb=$((max_mem_gb * 1024))
+        if [ "$server_mem_mb" -gt "$max_mem_mb" ]; then
+            server_mem_mb=$max_mem_mb
+        fi
+    fi
+
     echo "$server_mem_mb"
 }
 
@@ -260,7 +275,7 @@ run_server_for_world_gen() {
 
         # Wait for Chunky to complete
         local chunky_timeout
-        chunky_timeout=$(get_config "server.chunky_timeout_seconds" "600")
+        chunky_timeout=$(get_config "chunk_generation.timeout_seconds" "600")
         local chunky_elapsed=0
         local chunky_done=false
 
@@ -393,11 +408,13 @@ cmd_gen() {
 
     # Show config
     echo ""
-    print_info "Configuration (from worlds_config.json):"
-    local chunky_enabled chunks shape
+    print_info "Configuration (from config.json):"
+    local chunky_enabled chunks shape max_mem_gb
     chunky_enabled=$(get_config "chunk_generation.enabled" "true")
     chunks=$(get_config "chunk_generation.chunks" "100")
     shape=$(get_config "chunk_generation.shape" "square")
+    max_mem_gb=$(get_config "server.max_memory_gb" "0")
+    print_info "  Max memory: ${max_mem_gb}GB"
     print_info "  Chunky enabled: $chunky_enabled"
     print_info "  Chunks to generate: $chunks"
     print_info "  Shape: $shape"
@@ -565,7 +582,7 @@ usage() {
     echo "  bash worlds.bash use 1         Switch to world num1"
     echo "  bash worlds.bash list          Show all saved worlds"
     echo ""
-    echo "Configuration: Edit worlds_config.json to change settings"
+    echo "Configuration: Edit config.json to change settings"
     echo ""
 }
 
