@@ -1,4 +1,6 @@
 # Minecraft Server - World Data (reset with git reset --hard HEAD)
+worlds/
+
 minecraft/world/
 minecraft/world_nether/
 minecraft/world_the_end/
